@@ -1,0 +1,329 @@
+
+	--SELECT 
+	--	FxRates.FBalanceID, 
+	--	FxRates.FID,		  		  
+	--	CID.CurveID,		  
+	--	A.BrokerName AS Broker_Name,
+	--	C2.CurrencyCode AS CCY_Code_From,		  
+	--	C1.CurrencyCode AS CCY_Code_To,
+	--	FxRates.FXRateExpanded AS Broker_FX_Rate   ---C1
+	--	,FxRates.*
+	--	,BC.*
+	--FROM
+	--	[dbo].#tblTempFxRates FxRates
+	--	JOIN dbo.tblReconTemplates T ON T.TemplateID = FxRates.TemplateId
+	--	JOIN dbo.#tempUserAccts A ON A.AcctID = T.AcctID AND A.BrokerAcctID = FxRates.BrokerAcctID
+	--	JOIN dbo.#tempBaseCurrency BC ON BC.TemplateID = T.TemplateID
+	--	JOIN dbo.tblCurrency C1 ON BC.BaseCurrencyID = C1.CurrencyID
+	--	JOIN dbo.tblCurrency C2 ON FxRates.CurrencyID = C2.CurrencyID
+	--	JOIN dbo.#tempCurveIDList CID on CID.BrokerID = A.BrokerID
+	--WHERE 
+	--	C1.CurrencyID <> C2.CurrencyID
+		
+GO
+
+BEGIN /* Drop the existing temp tables if any */  
+   
+	IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tempRecon]'))                              
+	BEGIN                              
+	DROP TABLE dbo.#tempRecon    
+	END    
+     
+	IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tempUserAccts]'))                              
+	BEGIN                              
+	DROP TABLE dbo.#tempUserAccts
+	END  
+   
+	IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tempCurveIDList]'))                              
+	BEGIN                              
+	DROP TABLE dbo.#tempCurveIDList
+	END 
+   
+	IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tblTempFxRates]'))                              
+	BEGIN          
+	DROP TABLE dbo.#tblTempFxRates
+	END  
+
+	IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tblFxRates]'))                              
+	BEGIN                              
+	DROP TABLE dbo.#tblFxRates
+	END 
+
+	IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tblFinalRates]'))                              
+	BEGIN                              
+	DROP TABLE dbo.#tblFinalRates
+	END
+
+	IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tempBaseCurrency]'))                              
+	BEGIN                              
+	DROP TABLE dbo.#tempBaseCurrency
+	END
+
+	IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#TemplateIDWithNoBaseRateFromFile]'))                              
+	BEGIN                              
+	DROP TABLE dbo.#TemplateIDWithNoBaseRateFromFile
+	END
+
+END
+
+
+GO
+DECLARE @AccountGroupID INT = 2,
+@BrokerID INT = NULL
+
+BEGIN
+ 
+	DECLARE @AsofDate SMALLDATETIME
+
+	SELECT @AsofDate = '2018-07-03'--ConfigDateValue FROM [dbo].tblAppConfig WHERE ConfigName = 'AsOfDate'
+
+
+	 BEGIN /* Drop the existing temp tables if any */  
+   
+	   IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tempRecon]'))                              
+	   BEGIN                              
+	   DROP TABLE dbo.#tempRecon    
+	   END    
+     
+	   IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tempUserAccts]'))                              
+	   BEGIN                              
+	   DROP TABLE dbo.#tempUserAccts
+	   END  
+   
+	   IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tempCurveIDList]'))                              
+	   BEGIN                              
+	   DROP TABLE dbo.#tempCurveIDList
+	   END 
+   
+	   IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tblTempFxRates]'))                              
+	   BEGIN                              
+	   DROP TABLE dbo.#tblTempFxRates
+	   END  
+
+	   IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tblFxRates]'))                              
+	   BEGIN                              
+	   DROP TABLE dbo.#tblFxRates
+	   END 
+
+	   IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tblFinalRates]'))                              
+	   BEGIN                              
+	   DROP TABLE dbo.#tblFinalRates
+	   END
+
+	   IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#tempBaseCurrency]'))                              
+	   BEGIN                              
+	   DROP TABLE dbo.#tempBaseCurrency
+	   END
+
+	   IF EXISTS (SELECT ID FROM tempdb.dbo.SYSOBJECTS WHERE ID = object_id (N'[tempdb].[dbo].[#TemplateIDWithNoBaseRateFromFile]'))                              
+	   BEGIN                              
+	   DROP TABLE dbo.#TemplateIDWithNoBaseRateFromFile
+	   END
+
+	 END
+
+	 CREATE TABLE [dbo].#tblFinalRates
+	 (
+	 AsofDate smallDatetime, 
+	 CurveID varchar(50),
+	 Currency1 varchar(50),
+	 Currency2 varchar(50),
+	 Spot Decimal(28,15)
+	 )
+
+
+	SELECT 
+		FID,
+		TemplateID,
+		AsOfDate 			
+	INTO [dbo].#tempRecon 	
+	FROM 
+		dbo.tblFRecon 	
+	WHERE 
+		DATEDIFF(D,AsOfDate,@AsofDate) = 4
+
+
+
+	-- Get Accounts list	
+
+	SELECT 
+		A.AcctID,
+		A.MelAcctNum,
+		A.BaseCurrencyID,
+		BR.BrokerName, 
+		BR.BrokerID ,
+		BA.BrokerAcctID	
+	INTO [dbo].#tempUserAccts 
+	FROM 	
+		dbo.GET_ACCOUNTGROUP_ACCOUNTS(@AccountGroupID) UA 	
+		JOIN dbo.tblAcct A ON A.MelAcctNum = UA.MelAcctNum AND A.IsActive = 1
+		JOIN dbo.tblBrokerAcct BA ON BA.AcctID = A.AcctID	AND BA.IsActive = 1
+		JOIN dbo.tblBroker BR ON BR.BrokerID = BA.BrokerID	AND BR.IsActive = 1
+	WHERE	
+		BR.BrokerID = ISNULL(@BrokerId,BR.BrokerID)
+
+
+
+
+	--Get CurveID List associated to the Account Group ID and BrokerID
+
+	SELECT 
+		CurveIDMappingID, 
+		AccountGroupID, 
+		BrokerID, 
+		CurveID 
+	INTO [dbo].#tempCurveIDList 
+	FROM 
+		[dbo].[tblCurveIDAccountGroupMapping]	
+	WHERE 	
+		AccountGroupID = @AccountGroupID
+		AND BrokerID = ISNULL(@BrokerId,BrokerID)
+
+
+	--Get Broker FX Rate details
+
+	SELECT 
+		Recon.FID,
+		BM.CurrencyId, 
+		BB.FBalanceID,
+		BB.FXRateExpanded,   --C1
+		BB.BrokerAcctID,
+		Recon.TemplateID
+	INTO [dbo].#tblTempFxRates  
+	FROM
+		dbo.#tempRecon Recon 
+		JOIN dbo.tblFReconBalancesMaster BM ON Recon.FID = BM.FID
+		LEFT JOIN dbo.tblFReconBalancesBroker BB ON BM.FBalanceID = BB.FBalanceID  AND BB.FXRateBroker > 0 --Exclude Base to Base conversion (Ex: USD to USD) as it should not be displayed
+	WHERE 
+		BB.FXRateBroker IS NOT NULL 
+
+
+
+	--Get Base Currency ID by identifying FXRate value
+
+	SELECT 
+		TemplateID,
+		CurrencyId AS BaseCurrencyID,
+		BrokerAcctID
+	INTO #tempBaseCurrency
+	FROM
+		#tblTempFxRates
+	WHERE 
+		FXRateExpanded = CAST ( 1 AS DECIMAL (28,15))  --Base currency    ---C1
+
+	--Get Templateid which has no fxrate 1 in broker file
+
+	SELECT 
+		TemplateID
+	INTO #TemplateIDWithNoBaseRateFromFile
+	FROM
+		#tblTempFxRates
+	WHERE 
+		TemplateID NOT IN (SELECT TemplateID FROM #tempBaseCurrency)
+
+	--Get Base currency from account setup
+
+	INSERT INTO 
+		#tempBaseCurrency
+	SELECT 
+		T.TemplateID,
+		A.BaseCurrencyID AS BaseCurrencyID,
+		FxRates.BrokerAcctID
+	FROM 
+		[dbo].#tblTempFxRates FxRates
+		JOIN dbo.tblReconTemplates T ON T.TemplateID = FxRates.TemplateId
+		JOIN dbo.#tempUserAccts A ON A.AcctID = T.AcctID
+	WHERE FxRates.TemplateID IN (SELECT TemplateID FROM #TemplateIDWithNoBaseRateFromFile)
+
+
+
+	--Get Broker Names and From & to Currency details
+	SELECT 
+		@AsofDate AS AsofDate, 
+		FxRates.FBalanceID, 
+		FxRates.FID,		  		  
+		CID.CurveID,		  
+		A.BrokerName AS Broker_Name,
+		C2.CurrencyCode AS CCY_Code_From,		  
+		C1.CurrencyCode AS CCY_Code_To,
+		FxRates.FXRateExpanded AS Broker_FX_Rate   ---C1
+	INTO [dbo].#tblFxRates
+	FROM
+		[dbo].#tblTempFxRates FxRates
+		JOIN dbo.tblReconTemplates T ON T.TemplateID = FxRates.TemplateId
+		JOIN dbo.#tempUserAccts A ON A.AcctID = T.AcctID AND A.BrokerAcctID = FxRates.BrokerAcctID
+		JOIN dbo.#tempBaseCurrency BC ON BC.TemplateID = T.TemplateID AND BC.BrokerAcctID = A.BrokerAcctID
+		JOIN dbo.tblCurrency C1 ON BC.BaseCurrencyID = C1.CurrencyID
+		JOIN dbo.tblCurrency C2 ON FxRates.CurrencyID = C2.CurrencyID
+		JOIN dbo.#tempCurveIDList CID on CID.BrokerID = A.BrokerID
+	WHERE 
+		C1.CurrencyID <> C2.CurrencyID -- Do not include equal From and To currency (Ex: EUR - EUR)
+
+
+
+	--Get final report
+	INSERT #tblFinalRates
+	 (
+	 AsofDate, 
+	 CurveID,
+	 Currency1,
+	 Currency2,
+	 Spot 
+	 ) 
+	SELECT 
+		AsofDate, 		  
+		CurveID,
+		--999 is used to indicate it is least priority currency or not available in the currency table itself.
+		CASE
+		WHEN ISNULL(Curr1.CurrencyPriority,999) > ISNULL(Curr2.CurrencyPriority,999) THEN CCY_Code_To  --Lower the priority, major is the currency, Disply Inversed pair and Inverse Rate with 15 decimal 
+		ELSE CCY_Code_From --Display as received
+		END AS Currency1,
+
+		CASE
+		WHEN ISNULL(Curr1.CurrencyPriority,999) > ISNULL(Curr2.CurrencyPriority,999) THEN CCY_Code_From  --Lower the priority, major is the currency, Disply Inversed pair and Inverse Rate with 15 decimal 
+		ELSE CCY_Code_To --Display as received
+		END AS Currency2,
+
+		--Req: If the major currency is in the Currency 2 field, then the rate will need to be displayed as the inverse of the rate received. 
+		--	   If the major currency is in the Currency 1 field, then the rate will be displayed as it was received. 
+		--     Report should not pull records where CCY1 = CCY2   
+		CASE
+		WHEN ISNULL(Curr1.CurrencyPriority,999) > ISNULL(Curr2.CurrencyPriority,999) THEN CAST((1/Broker_FX_Rate) AS DECIMAL(28,15)) --Lower the priority, major is the currency, Disply Inverse with 15 decimal
+		WHEN ISNULL(Curr1.CurrencyPriority,999) = ISNULL(Curr2.CurrencyPriority,999) THEN NULL  --From and To currency both are equal, then do not display
+		ELSE Broker_FX_Rate --Display as received
+		END AS Spot
+	FROM 
+		dbo.#tblFxRates Rates
+		LEFT JOIN dbo.tblCurrencyPriority Curr1	on Rates.CCY_Code_From = Curr1.CurrencyCode
+		LEFT JOIN dbo.tblCurrencyPriority Curr2	on Rates.CCY_Code_To = Curr2.CurrencyCode
+
+-- Testing Purpose
+
+--select * from #tempRecon
+--select * from #tempUserAccts
+--select * from #tempCurveIDList	
+--select * from #tblTempFxRates
+--select * from #tblFxRates
+
+
+	SELECT 
+		AsofDate, 
+		CurveID,
+		Currency1,
+		Currency2,
+		Spot 
+	FROM 
+		#tblFinalRates
+	WHERE 
+		Spot IS NOT NULL --Do not include equal currencies (Ex: AUD - AUD)
+	GROUP BY 
+		AsofDate, 
+		CurveID, 
+		Currency1, 
+		Currency2, 
+		Spot
+	ORDER BY 1,2,3,4
+
+
+END
+
